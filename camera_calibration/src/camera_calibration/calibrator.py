@@ -32,7 +32,6 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import print_function
 try:
     from cStringIO import StringIO
 except ImportError:
@@ -328,7 +327,7 @@ class Calibrator(object):
             if not self.is_slow_moving(corners, last_frame_corners):
                 return False
 
-        # All tests passed, image should be good for calibration
+        # All tests passed
         return True
 
     _param_names = ["X", "Y", "Size", "Skew"]
@@ -453,11 +452,10 @@ class Calibrator(object):
         return (scrib, corners, downsampled_corners, board, (x_scale, y_scale))
 
 
-    @staticmethod
-    def lrmsg(d, k, r, p, size):
+    def lrmsg(self, d, k, r, p):
         """ Used by :meth:`as_message`.  Return a CameraInfo message for the given calibration matrices """
         msg = sensor_msgs.msg.CameraInfo()
-        msg.width, msg.height = size
+        (msg.width, msg.height) = self.size
         if d.size > 5:
             msg.distortion_model = "rational_polynomial"
         else:
@@ -468,88 +466,71 @@ class Calibrator(object):
         msg.P = numpy.ravel(p).copy().tolist()
         return msg
 
-    @staticmethod
-    def lrreport(d, k, r, p):
-        print("D =", numpy.ravel(d).tolist())
-        print("K =", numpy.ravel(k).tolist())
-        print("R =", numpy.ravel(r).tolist())
-        print("P =", numpy.ravel(p).tolist())
+    def lrreport(self, d, k, r, p):
+        print("D = ", numpy.ravel(d).tolist())
+        print("K = ", numpy.ravel(k).tolist())
+        print("R = ", numpy.ravel(r).tolist())
+        print("P = ", numpy.ravel(p).tolist())
 
-    @staticmethod
-    def lrost(name, d, k, r, p, size):
-        assert k.shape == (3, 3)
-        assert r.shape == (3, 3)
-        assert p.shape == (3, 4)
-        calmessage = "\n".join([
-            "# oST version 5.0 parameters",
-            "",
-            "",
-            "[image]",
-            "",
-            "width",
-            "%d" % size[0],
-            "",
-            "height",
-            "%d" % size[1],
-            "",
-            "[%s]" % name,
-            "",
-            "camera matrix",
-            " ".join("%8f" % k[0,i] for i in range(3)),
-            " ".join("%8f" % k[1,i] for i in range(3)),
-            " ".join("%8f" % k[2,i] for i in range(3)),
-            "",
-            "distortion",
-            " ".join("%8f" % x for x in d.flat),
-            "",
-            "rectification",
-            " ".join("%8f" % r[0,i] for i in range(3)),
-            " ".join("%8f" % r[1,i] for i in range(3)),
-            " ".join("%8f" % r[2,i] for i in range(3)),
-            "",
-            "projection",
-            " ".join("%8f" % p[0,i] for i in range(4)),
-            " ".join("%8f" % p[1,i] for i in range(4)),
-            " ".join("%8f" % p[2,i] for i in range(4)),
-            ""
-        ])
+    def lrost(self, name, d, k, r, p):
+        calmessage = (
+        "# oST version 5.0 parameters\n"
+        + "\n"
+        + "\n"
+        + "[image]\n"
+        + "\n"
+        + "width\n"
+        + str(self.size[0]) + "\n"
+        + "\n"
+        + "height\n"
+        + str(self.size[1]) + "\n"
+        + "\n"
+        + "[%s]" % name + "\n"
+        + "\n"
+        + "camera matrix\n"
+        + " ".join(["%8f" % k[0,i] for i in range(3)]) + "\n"
+        + " ".join(["%8f" % k[1,i] for i in range(3)]) + "\n"
+        + " ".join(["%8f" % k[2,i] for i in range(3)]) + "\n"
+        + "\n"
+        + "distortion\n"
+        + " ".join(["%8f" % d[i,0] for i in range(d.shape[0])]) + "\n"
+        + "\n"
+        + "rectification\n"
+        + " ".join(["%8f" % r[0,i] for i in range(3)]) + "\n"
+        + " ".join(["%8f" % r[1,i] for i in range(3)]) + "\n"
+        + " ".join(["%8f" % r[2,i] for i in range(3)]) + "\n"
+        + "\n"
+        + "projection\n"
+        + " ".join(["%8f" % p[0,i] for i in range(4)]) + "\n"
+        + " ".join(["%8f" % p[1,i] for i in range(4)]) + "\n"
+        + " ".join(["%8f" % p[2,i] for i in range(4)]) + "\n"
+        + "\n")
         assert len(calmessage) < 525, "Calibration info must be less than 525 bytes"
         return calmessage
 
-    @staticmethod
-    def lryaml(name, d, k, r, p, size):
-        def format_mat(x, precision):
-            return ("[%s]" % (
-                numpy.array2string(x, precision=precision, suppress_small=True, separator=", ")
-                    .replace("[", "").replace("]", "").replace("\n", "\n        ")
-            ))
-
-        assert k.shape == (3, 3)
-        assert r.shape == (3, 3)
-        assert p.shape == (3, 4)
-        calmessage = "\n".join([
-            "image_width: %d" % size[0],
-            "image_height: %d" % size[1],
-            "camera_name: " + name,
-            "camera_matrix:",
-            "  rows: 3",
-            "  cols: 3",
-            "  data: " + format_mat(k, 5),
-            "distortion_model: " + ("rational_polynomial" if d.size > 5 else "plumb_bob"),
-            "distortion_coefficients:",
-            "  rows: 1",
-            "  cols: %d" % d.size,
-            "  data: [%s]" % ", ".join("%8f" % x for x in d.flat),
-            "rectification_matrix:",
-            "  rows: 3",
-            "  cols: 3",
-            "  data: " + format_mat(r, 8),
-            "projection_matrix:",
-            "  rows: 3",
-            "  cols: 4",
-            "  data: " + format_mat(p, 5),
-            ""
-        ])
+    def lryaml(self, name, d, k, r, p):
+        calmessage = (""
+        + "image_width: " + str(self.size[0]) + "\n"
+        + "image_height: " + str(self.size[1]) + "\n"
+        + "camera_name: " + name + "\n"
+        + "camera_matrix:\n"
+        + "  rows: 3\n"
+        + "  cols: 3\n"
+        + "  data: [" + ", ".join(["%8f" % i for i in k.reshape(1,9)[0]]) + "]\n"
+        + "distortion_model: " + ("rational_polynomial" if d.size > 5 else "plumb_bob") + "\n"
+        + "distortion_coefficients:\n"
+        + "  rows: 1\n"
+        + "  cols: 5\n"
+        + "  data: [" + ", ".join(["%8f" % d[i,0] for i in range(d.shape[0])]) + "]\n"
+        + "rectification_matrix:\n"
+        + "  rows: 3\n"
+        + "  cols: 3\n"
+        + "  data: [" + ", ".join(["%8f" % i for i in r.reshape(1,9)[0]]) + "]\n"
+        + "projection_matrix:\n"
+        + "  rows: 3\n"
+        + "  cols: 4\n"
+        + "  data: [" + ", ".join(["%8f" % i for i in p.reshape(1,12)[0]]) + "]\n"
+        + "")
         return calmessage
 
     def do_save(self):
@@ -648,17 +629,19 @@ class MonoCalibrator(Calibrator):
         ipts = [ points for (points, _) in good ]
         opts = self.mk_object_points(boards)
 
+        self.intrinsics = numpy.zeros((3, 3), numpy.float64)
+        if self.calib_flags & cv2.CALIB_RATIONAL_MODEL:
+            self.distortion = numpy.zeros((8, 1), numpy.float64) # rational polynomial
+        else:
+            self.distortion = numpy.zeros((5, 1), numpy.float64) # plumb bob
         # If FIX_ASPECT_RATIO flag set, enforce focal lengths have 1/1 ratio
-        intrinsics_in = numpy.eye(3, dtype=numpy.float64)
-        reproj_err, self.intrinsics, dist_coeffs, rvecs, tvecs = cv2.calibrateCamera(
+        self.intrinsics[0,0] = 1.0
+        self.intrinsics[1,1] = 1.0
+        cv2.calibrateCamera(
                    opts, ipts,
-                   self.size,
-                   intrinsics_in,
-                   None,
+                   self.size, self.intrinsics,
+                   self.distortion,
                    flags = self.calib_flags)
-        # OpenCV returns more than 8 coefficients (the additional ones all zeros) when CALIB_RATIONAL_MODEL is set.
-        # The extra ones include e.g. thin prism coefficients, which we are not interested in.
-        self.distortion = dist_coeffs.flat[:8].reshape(-1, 1)
 
         # R is identity matrix for monocular calibration
         self.R = numpy.eye(3, dtype=numpy.float64)
@@ -704,7 +687,7 @@ class MonoCalibrator(Calibrator):
 
     def as_message(self):
         """ Return the camera calibration as a CameraInfo message """
-        return self.lrmsg(self.distortion, self.intrinsics, self.R, self.P, self.size)
+        return self.lrmsg(self.distortion, self.intrinsics, self.R, self.P)
 
     def from_message(self, msg, alpha = 0.0):
         """ Initialize the camera calibration from a CameraInfo message """
@@ -721,10 +704,10 @@ class MonoCalibrator(Calibrator):
         self.lrreport(self.distortion, self.intrinsics, self.R, self.P)
 
     def ost(self):
-        return self.lrost(self.name, self.distortion, self.intrinsics, self.R, self.P, self.size)
+        return self.lrost(self.name, self.distortion, self.intrinsics, self.R, self.P)
 
     def yaml(self):
-        return self.lryaml(self.name, self.distortion, self.intrinsics, self.R, self.P, self.size)
+        return self.lryaml(self.name, self.distortion, self.intrinsics, self.R, self.P)
 
     def linear_error_from_image(self, image):
         """
@@ -985,8 +968,8 @@ class StereoCalibrator(Calibrator):
         and right cameras respectively.
         """
 
-        return (self.lrmsg(self.l.distortion, self.l.intrinsics, self.l.R, self.l.P, self.size),
-                self.lrmsg(self.r.distortion, self.r.intrinsics, self.r.R, self.r.P, self.size))
+        return (self.lrmsg(self.l.distortion, self.l.intrinsics, self.l.R, self.l.P),
+                self.lrmsg(self.r.distortion, self.r.intrinsics, self.r.R, self.r.P))
 
     def from_message(self, msgs, alpha = 0.0):
         """ Initialize the camera calibration from a pair of CameraInfo messages.  """
@@ -1006,15 +989,15 @@ class StereoCalibrator(Calibrator):
         self.lrreport(self.l.distortion, self.l.intrinsics, self.l.R, self.l.P)
         print("\nRight:")
         self.lrreport(self.r.distortion, self.r.intrinsics, self.r.R, self.r.P)
-        print("self.T =", numpy.ravel(self.T).tolist())
-        print("self.R =", numpy.ravel(self.R).tolist())
+        print("self.T ", numpy.ravel(self.T).tolist())
+        print("self.R ", numpy.ravel(self.R).tolist())
 
     def ost(self):
-        return (self.lrost(self.name + "/left", self.l.distortion, self.l.intrinsics, self.l.R, self.l.P, self.size) +
-          self.lrost(self.name + "/right", self.r.distortion, self.r.intrinsics, self.r.R, self.r.P, self.size))
+        return (self.lrost(self.name + "/left", self.l.distortion, self.l.intrinsics, self.l.R, self.l.P) +
+          self.lrost(self.name + "/right", self.r.distortion, self.r.intrinsics, self.r.R, self.r.P))
 
     def yaml(self, suffix, info):
-        return self.lryaml(self.name + suffix, info.distortion, info.intrinsics, info.R, info.P, self.size)
+        return self.lryaml(self.name + suffix, info.distortion, info.intrinsics, info.R, info.P)
 
     # TODO Get rid of "from_images" versions of these, instead have function to get undistorted corners
     def epipolar_error_from_images(self, limage, rimage):
