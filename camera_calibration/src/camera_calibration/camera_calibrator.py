@@ -37,7 +37,7 @@ import numpy
 import os
 import threading
 import time
-from camera_calibration.calibrator import MonoCalibrator, ChessboardInfo, Patterns
+from calibrator import MonoCalibrator, ChessboardInfo, Patterns
 from collections import deque
 
 
@@ -55,8 +55,9 @@ class DisplayThread(threading.Thread):
 
     def run(self):
         cv2.namedWindow("display", cv2.WINDOW_NORMAL)
+        cv2.setWindowProperty("display", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
         cv2.setMouseCallback("display", self.opencv_calibration_node.on_mouse)
-        cv2.createTrackbar("scale", "display", 0, 100, self.opencv_calibration_node.on_scale)
+        # cv2.createTrackbar("scale", "display", 0, 100, self.opencv_calibration_node.on_scale)
         while True:
             # wait for an image (could happen at the very beginning when the queue is still empty)
             while len(self.queue) == 0:
@@ -85,12 +86,12 @@ class ConsumerThread(threading.Thread):
 
 
 class CalibrationNode:
-    def __init__(self, boards, service_check = True, flags = 0,
+    def __init__(self, boards, flags = 0,
                  pattern=Patterns.Chessboard, camera_name='', checkerboard_flags = 0, max_chessboard_speed = -1):
         
         self._boards = boards
         self._calib_flags = flags
-        self._checkerboard_flags = checkerboard_flags
+        self._checkerboard_flags = 0
         self._pattern = pattern
         self._camera_name = camera_name
         self._max_chessboard_speed = max_chessboard_speed
@@ -119,13 +120,13 @@ class CalibrationNode:
     def handle_monocular(self, msg):
         if self.c == None:
             if self._camera_name:
-                self.c = MonoCalibrator(self._boards, self._calib_flags, self._pattern, name=self._camera_name,
-                                        checkerboard_flags=self._checkerboard_flags,
-                                        max_chessboard_speed = self._max_chessboard_speed)
+                self.c = MonoCalibrator(self._boards, 0, self._pattern, name=self._camera_name,
+                                        checkerboard_flags = 0,
+                                        max_chessboard_speed = -1)
             else:
-                self.c = MonoCalibrator(self._boards, self._calib_flags, self._pattern,
-                                        checkerboard_flags=self.checkerboard_flags,
-                                        max_chessboard_speed = self._max_chessboard_speed)
+                self.c = MonoCalibrator(self._boards, 0, self._pattern,
+                                        checkerboard_flags = 0,
+                                        max_chessboard_speed = -1)
 
         # This should just call the MonoCalibrator
         drawable = self.c.handle_msg(msg)
@@ -135,8 +136,6 @@ class CalibrationNode:
     def do_upload(self):
         self.c.report()
         print(self.c.ost())
-        info = self.c.as_message()
-        print(info)
         return True
 
 
@@ -148,8 +147,9 @@ class OpenCVCalibrationNode(CalibrationNode):
 
     def __init__(self, *args, **kwargs):
 
-        self.cal_node = CalibrationNode(self, *args, **kwargs)
+        CalibrationNode.__init__(self, *args, **kwargs)
 
+        self.calibration_button_pressed = False
         self.queue_display = deque([], 1)
         self.display_thread = DisplayThread(self.queue_display, self)
         self.display_thread.setDaemon(True)
@@ -166,15 +166,14 @@ class OpenCVCalibrationNode(CalibrationNode):
     def on_mouse(self, event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN and self.displaywidth < x:
             if self.c.goodenough:
-                if 180 <= y < 280:
+                if 280 <= y < 380:
+                    print("calibration button pressed!!")
+                    self.calibration_button_pressed = True
                     self.c.do_calibration()
             if self.c.calibrated:
-                if 280 <= y < 380:
+                if 380 <= y < 480:
+                    print("save button pressed!!")
                     self.c.do_save()
-                elif 380 <= y < 480:
-                    # Only shut down if we set camera info correctly, #3993
-                    if self.do_upload():
-                        rospy.signal_shutdown('Quit')
 
     def on_scale(self, scalevalue):
         if self.c.calibrated:
@@ -193,9 +192,8 @@ class OpenCVCalibrationNode(CalibrationNode):
 
     def buttons(self, display):
         x = self.displaywidth
-        self.button(display[180:280,x:x+100], "CALIBRATE", self.c.goodenough)
-        self.button(display[280:380,x:x+100], "SAVE", self.c.calibrated)
-        self.button(display[380:480,x:x+100], "COMMIT", self.c.calibrated)
+        self.button(display[280:380,x:x+100], "CALIBRATE", self.c.goodenough)
+        self.button(display[380:480,x:x+100], "SAVE", self.c.calibrated)
 
     def y(self, i):
         """Set up right-size images"""
@@ -210,11 +208,10 @@ class OpenCVCalibrationNode(CalibrationNode):
     def redraw_monocular(self, drawable):
         height = drawable.scrib.shape[0]
         width = drawable.scrib.shape[1]
-
+        
         display = numpy.zeros((max(480, height), width + 100, 3), dtype=numpy.uint8)
         display[0:height, 0:width,:] = drawable.scrib
         display[0:height, width:width+100,:].fill(255)
-
 
         self.buttons(display)
         if not self.c.calibrated:
