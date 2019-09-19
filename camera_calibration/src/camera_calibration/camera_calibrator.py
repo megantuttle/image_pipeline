@@ -37,7 +37,7 @@ import numpy
 import os
 import threading
 import time
-from camera_calibration.calibrator import MonoCalibrator, StereoCalibrator, ChessboardInfo, Patterns
+from camera_calibration.calibrator import MonoCalibrator, ChessboardInfo, Patterns
 from collections import deque
 
 
@@ -96,19 +96,19 @@ class CalibrationNode:
         self._max_chessboard_speed = max_chessboard_speed
 
         # subscribe to mono-camera image topic, put the images in a queue -- TODO replace this with a call to the raspicam
-        msub = message_filters.Subscriber('image', sensor_msgs.msg.Image)
-        msub.registerCallback(self.queue_monocular) #### we want to run queue_monocular whenever an image message is received
+        # msub = message_filters.Subscriber('image', sensor_msgs.msg.Image)
+        # msub.registerCallback(self.queue_monocular) #### we want to run queue_monocular whenever an image message is received
 
         # declare deque type. this is like a list but with faster operations
-        self.q_mono = deque([], 1)
+        # self.q_mono = deque([], 1)
 
         # initialize camera object
         self.c = None
 
         # spin up a thread -- this takes a queue and a function and runs the function on the 0th item in the queue until the queue is empty, sleeping while queue is empty  
-        mth = ConsumerThread(self.q_mono, self.handle_monocular)
-        mth.setDaemon(True)
-        mth.start()
+        # mth = ConsumerThread(self.q_mono, self.handle_monocular)
+        # mth.setDaemon(True)
+        # mth.start()
 
     def redraw_monocular(self, *args):
         pass
@@ -148,7 +148,7 @@ class OpenCVCalibrationNode(CalibrationNode):
 
     def __init__(self, *args, **kwargs):
 
-        CalibrationNode.__init__(self, *args, **kwargs)
+        self.cal_node = CalibrationNode(self, *args, **kwargs)
 
         self.queue_display = deque([], 1)
         self.display_thread = DisplayThread(self.queue_display, self)
