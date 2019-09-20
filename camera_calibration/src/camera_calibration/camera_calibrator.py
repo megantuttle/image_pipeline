@@ -96,28 +96,13 @@ class CalibrationNode:
         self._camera_name = camera_name
         self._max_chessboard_speed = max_chessboard_speed
 
-        # subscribe to mono-camera image topic, put the images in a queue -- TODO replace this with a call to the raspicam
-        # msub = message_filters.Subscriber('image', sensor_msgs.msg.Image)
-        # msub.registerCallback(self.queue_monocular) #### we want to run queue_monocular whenever an image message is received
-
-        # declare deque type. this is like a list but with faster operations
-        # self.q_mono = deque([], 1)
-
         # initialize camera object
         self.c = None
-
-        # spin up a thread -- this takes a queue and a function and runs the function on the 0th item in the queue until the queue is empty, sleeping while queue is empty  
-        # mth = ConsumerThread(self.q_mono, self.handle_monocular)
-        # mth.setDaemon(True)
-        # mth.start()
 
     def redraw_monocular(self, *args):
         pass
 
-    def queue_monocular(self, msg):
-        self.q_mono.append(msg)
-
-    def handle_monocular(self, msg):
+    def handle_monocular(self, img):
         if self.c == None:
             if self._camera_name:
                 self.c = MonoCalibrator(self._boards, 0, self._pattern, name=self._camera_name,
@@ -129,7 +114,7 @@ class CalibrationNode:
                                         max_chessboard_speed = -1)
 
         # This should just call the MonoCalibrator
-        drawable = self.c.handle_msg(msg)
+        drawable = self.c.handle_msg(img)
         self.displaywidth = drawable.scrib.shape[1]
         self.redraw_monocular(drawable)
 
@@ -190,10 +175,10 @@ class OpenCVCalibrationNode(CalibrationNode):
         (w, h) = self.getTextSize(label)
         self.putText(dst, label, ((size[0] - w) // 2, (size[1] + h) // 2), (255,255,255))
 
-    def buttons(self, display):
+    def buttons(self):
         x = self.displaywidth
-        self.button(display[280:380,x:x+100], "CALIBRATE", self.c.goodenough)
-        self.button(display[380:480,x:x+100], "SAVE", self.c.calibrated)
+        self.button(self.display[280:380,x:x+100], "CALIBRATE", self.c.goodenough)
+        self.button(self.display[380:480,x:x+100], "SAVE", self.c.calibrated)
 
     def y(self, i):
         """Set up right-size images"""
@@ -209,32 +194,32 @@ class OpenCVCalibrationNode(CalibrationNode):
         height = drawable.scrib.shape[0]
         width = drawable.scrib.shape[1]
         
-        display = numpy.zeros((max(480, height), width + 100, 3), dtype=numpy.uint8)
-        display[0:height, 0:width,:] = drawable.scrib
-        display[0:height, width:width+100,:].fill(255)
+        self.display = numpy.zeros((max(480, height), width + 100, 3), dtype=numpy.uint8)
+        self.display[0:height, 0:width,:] = drawable.scrib
+        self.display[0:height, width:width+100,:].fill(255)
 
-        self.buttons(display)
+        self.buttons()
         if not self.c.calibrated:
             if drawable.params:
                  for i, (label, lo, hi, progress) in enumerate(drawable.params):
                     (w,_) = self.getTextSize(label)
-                    self.putText(display, label, (width + (100 - w) // 2, self.y(i)))
+                    self.putText(self.display, label, (width + (100 - w) // 2, self.y(i)))
                     color = (0,255,0)
                     if progress < 1.0:
                         color = (0, int(progress*255.), 255)
-                    cv2.line(display,
+                    cv2.line(self.display,
                             (int(width + lo * 100), self.y(i) + 20),
                             (int(width + hi * 100), self.y(i) + 20),
                             color, 4)
 
         else:
-            self.putText(display, "lin.", (width, self.y(0)))
+            self.putText(self.display, "lin.", (width, self.y(0)))
             linerror = drawable.linear_error
             if linerror < 0:
                 msg = "?"
             else:
                 msg = "%.2f" % linerror
                 #print "linear", linerror
-            self.putText(display, msg, (width, self.y(1)))
+            self.putText(self.display, msg, (width, self.y(1)))
 
-        self.queue_display.append(display)
+        self.queue_display.append(self.display)

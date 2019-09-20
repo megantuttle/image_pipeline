@@ -5,10 +5,12 @@ import picamera
 import numpy as np
 import cv2
 import os
+import tkinter as tk
 
 from camera_calibrator import OpenCVCalibrationNode
 from calibrator import ChessboardInfo, Patterns
 from collections import deque
+
 
 class ImageProcessor(threading.Thread):
     def __init__(self, owner):
@@ -105,81 +107,98 @@ class ConsumerThread(threading.Thread):
                 time.sleep(0.1)
             self.function(self.node, self.queue[0])
 
-#########################################################################
-with picamera.PiCamera() as camera:
-    width = 7
-    height = 5
 
-    # define checkerboard info
-    boards = []
-    size = [ str(width)+"x"+str(height) ]
-    square = ["0.108"]
-    for (sz, sq) in zip(size, square):
-        size = tuple([int(c) for c in sz.split('x')])
-        boards.append(ChessboardInfo(size[0], size[1], float(sq)))
-    pattern = Patterns.Chessboard
+class MainActivity(object):
+    def __init__(self, camera):
+        self.camera = camera
 
-    ## start up the calibration node
-    node = OpenCVCalibrationNode(boards, pattern)
+        width = 9
+        height = 6
 
-    ## set camera parameters
-    # camera.resolution = (3280, 2464)
-    # camera.sensor_mode = 2
-    camera.resolution = (760, 480)
-    camera.framerate = 15
-    
-    ## start streaming
-    #camera.start_preview()#resolution=(760, 480))
-    time.sleep(1)
-    output = ProcessOutput(width, height)
-    camera.start_recording(output, format='mjpeg', quality=100)
+        # define checkerboard info
+        boards = []
+        size = [ str(width)+"x"+str(height) ]
+        square = ["0.108"]
+        for (sz, sq) in zip(size, square):
+            size = tuple([int(c) for c in sz.split('x')])
+            boards.append(ChessboardInfo(size[0], size[1], float(sq)))
+        pattern = Patterns.Chessboard
 
-    ## spin up a thread for processing images
-    img_thread = ConsumerThread(output.q_mono, node.handle_monocular, node)
-    img_thread.setDaemon(True)
-    img_thread.start()
+        ## start up the calibration node
+        self.node = OpenCVCalibrationNode(boards, pattern)
+
+        ## set camera parameters
+        # camera.resolution = (3280, 2464)
+        # camera.sensor_mode = 2
+        self.camera.resolution = (1640, 1232)#(760, 480)
+        self.camera.framerate = 15
+        
+        ## start streaming
+        #camera.start_preview()#resolution=(760, 480))
+        time.sleep(1)
+        output = ProcessOutput(width, height)
+        self.camera.start_recording(output, format='mjpeg', quality=100)
+
+        ## spin up a thread for processing images
+        img_thread = ConsumerThread(output.q_mono, OpenCVCalibrationNode.handle_monocular, self.node)
+        img_thread.setDaemon(True)
+        img_thread.start()
+
+        while not self.node.calibration_button_pressed:
+            self.camera.wait_recording(0.1)
+        
+        print("processing calibration images...")
+
+        # create a window to inform the user that we are waiting on the processor -- the window will close itself once the calibration is complete
+        self.root = tk.Tk()
+        self.root.title("Processing...")
+        label = tk.Label(self.root, text="Please wait while the calibration images are processed.")
+        label.pack()
+        self.root.after(200, self.checkForCalComplete)
+        self.root.mainloop()
+
+        print("rms: ", self.node.c.rms)
+        
+        # wait until the user presses "save"
+        while not self.node.c.saved:
+            self.camera.wait_recording(0.1)
+
+        print("parameters saved!")
+
+        self.camera.wait_recording(1)
+
+        #capture
+        myStreamFull = io.BytesIO()
+        self.camera.capture(myStreamFull, format='jpeg')
+        dataFull = np.frombuffer(myStreamFull.getvalue(), dtype=np.uint8)
+        imgFull = cv2.imdecode(dataFull, 1)
+
+        cv2.imshow('Raw image', imgFull)
+        #cv2.imwrite('raw.jpg', imgFull)
+
+        #undistort
+        img_undistorted = cv2.undistort(imgFull, self.node.c.intrinsics, self.node.c.distortion)
+        cv2.imshow('Undistorted', img_undistorted)
+        #cv2.imwrite('undistor.jpg', img_undistorted)
+        cv2.waitKey(0)
+
+        output.done = True
+        self.camera.stop_recording()
+        img_thread.terminated = True
+        img_thread.join()
+        print("process complete!")
 
 
-    ######### TODO continue processing images and recording until the save button is pressed, then quit
+    def checkForCalComplete(self):
+        # wait to process so we can print the calculated rms
+        while not self.node.c.calibrated:
+            self.camera.wait_recording(0.1)
+        self.root.destroy()
 
-    while not output.done:
-        print("length of queue:", len(output.q_mono))
-        if node.calibration_button_pressed:
-            break
-        camera.wait_recording(1)
-    
-    print("finished calibration")
-    # wait to process so we can print the calculated rms
-    while not node.c.calibrated:
-        time.sleep(0.1)
 
-    print("rms: ", node.c.rms)
-    
-    # wait until the user presses "save"
-    while not node.c.saved:
-        time.sleep(0.1)
+if __name__ == '__main__':
+    print("starting camera...")
+    with picamera.PiCamera() as camera:
+        MainActivity(camera)
 
-    print("parameters saved!")
-
-    time.sleep(5)
-
-    #capture
-    myStreamFull = io.BytesIO()
-    camera.capture(myStreamFull, format='jpeg')
-    dataFull = np.frombuffer(myStreamFull.getvalue(), dtype=np.uint8)
-    imgFull = cv2.imdecode(dataFull, 1)
-
-    cv2.imshow('Raw image', imgFull)
-    #cv2.imwrite('raw.jpg', imgFull)
-
-    #undistort
-    img_undistorted = cv2.undistort(imgFull, node.c.intrinsics, node.c.distortion)
-    cv2.imshow('Undistorted', img_undistorted)
-    #cv2.imwrite('undistor.jpg', img_undistorted)
-    cv2.waitKey(0)
-
-    output.done = True
-    camera.stop_recording()
-    img_thread.terminated = True
-    img_thread.join()
-    print("process complete!")
+    print("shutting down")
